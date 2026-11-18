@@ -111,17 +111,21 @@
 <script setup>
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { getConfigFromWikiCloud } from '../utils/api'
+import {
+  parseLunarDate,
+  getNextLunarOccurrence,
+  daysUntilLunar,
+  lunarAnniversaryYears,
+} from '../utils/lunar'
 
 // 配置数据
 const config = ref({})
 
-// 恋爱开始日期
+// 恋爱开始日期（公历，保持不变）
 const loveDate = ref('2023-01-15')
 
-// 结婚日期
+// 结婚日期（农历：年份用于计周年，月日按农历解释）
 const weddingDate = ref('2015-03-03')
-
-
 
 // 精选照片
 const featuredPhotos = ref([
@@ -135,12 +139,10 @@ const featuredPhotos = ref([
 // 爱情宣言
 const loveDeclaration = ref('我能想到最浪漫的事，就是和你一起慢慢变老。')
 
-
-
 // 重要日期倒计时
 const importantDays = ref([])
 
-// 计算恋爱时间（精确到秒）
+// 计算恋爱时间（精确到秒）—— 公历逻辑，保持不变
 const calculateLoveTime = () => {
   const today = new Date()
   const startDate = new Date(loveDate.value)
@@ -189,32 +191,23 @@ const calculateLoveTime = () => {
 // 恋爱时间对象
 const loveTime = ref(calculateLoveTime())
 
-// 计算结婚周年相关信息
+// 计算结婚周年相关信息（农历）
 const calculateWeddingAnniversary = () => {
   const today = new Date()
-  const wedding = new Date(weddingDate.value)
-  
-  // 计算当前结婚周年数
-  const currentYear = today.getFullYear()
-  const weddingYear = wedding.getFullYear()
-  let anniversary = currentYear - weddingYear
-  
-  // 检查今年的结婚纪念日是否已经过了
-  const thisYearsAnniversary = new Date(currentYear, wedding.getMonth(), wedding.getDate())
-  if (today < thisYearsAnniversary) {
-    anniversary--
+
+  // 取下一个农历结婚纪念日的公历日期
+  const parsed = parseLunarDate(weddingDate.value)
+  if (!parsed) {
+    return { anniversary: 0, daysUntilNext: 0 }
   }
-  
-  // 计算下一个结婚纪念日
-  let nextAnniversaryDate = new Date(currentYear, wedding.getMonth(), wedding.getDate())
-  if (today > nextAnniversaryDate) {
-    nextAnniversaryDate.setFullYear(currentYear + 1)
-  }
-  
-  // 计算距离下一个结婚纪念日的天数
-  const timeDiff = nextAnniversaryDate.getTime() - today.getTime()
-  const daysUntilNext = Math.ceil(timeDiff / (1000 * 3600 * 24))
-  
+
+  // 已满多少周年（农历计）
+  const passed = lunarAnniversaryYears(weddingDate.value, today)
+  const anniversary = passed === null ? 0 : passed
+
+  // 距离下一个纪念日还有多少天
+  const daysUntilNext = daysUntilLunar(parsed.month, parsed.day, today)
+
   return {
     anniversary,
     daysUntilNext
@@ -224,9 +217,9 @@ const calculateWeddingAnniversary = () => {
 // 结婚周年信息
 const weddingInfo = ref(calculateWeddingAnniversary())
 
-// 计算属性：当前结婚周年数
+// 计算属性：当前结婚周年数（下一个周年）
 const weddingAnniversary = computed(() => {
-  return weddingInfo.value.anniversary + 1 // +1 表示下一个周年
+  return weddingInfo.value.anniversary + 1
 })
 
 // 计算属性：距离下一个结婚周年的天数
@@ -242,17 +235,18 @@ onMounted(async () => {
   const fetchedConfig = await getConfigFromWikiCloud()
   config.value = fetchedConfig
   
-  // 更新恋爱开始日期
+  // 更新恋爱开始日期（公历）
   if (config.value.loveDate) {
     loveDate.value = config.value.loveDate
   }
   
-  // 更新结婚日期
-  if (config.value.weddingDate) {
-    weddingDate.value = config.value.weddingDate
+  // 更新结婚日期（农历）
+  // 注意：兼容配置表中的 weddingDay 与 weddingDate 两种字段名
+  const wedCfg = config.value.weddingDay || config.value.weddingDate
+  if (wedCfg) {
+    weddingDate.value = wedCfg
+    weddingInfo.value = calculateWeddingAnniversary()
   }
-  
-
   
   // 更新精选照片
   if (config.value.featuredPhotos) {
@@ -271,37 +265,34 @@ onMounted(async () => {
     loveDeclaration.value = config.value.sayLove
   }
   
-  // 更新重要日期倒计时
+  // 更新重要日期倒计时（农历）
   if (config.value.importantDay) {
-    // 解析重要日期
-    const importantDaysData = config.value.importantDay.split(';').map(item => {
-      const [name, dateStr] = item.split(',').map(str => str.trim())
-      return { name, dateStr }
-    }).filter(item => item.name && item.dateStr)
-    
-    // 计算每个重要日期的剩余天数
+    // 解析重要日期：格式为 "名称,月-日;名称2,月-日"
+    const importantDaysData = config.value.importantDay
+      .split(';')
+      .map((item) => {
+        const idx = item.indexOf(',')
+        if (idx === -1) return null
+        const name = item.slice(0, idx).trim()
+        const dateStr = item.slice(idx + 1).trim()
+        return { name, dateStr }
+      })
+      .filter((item) => item && item.name && item.dateStr)
+
+    // 按农历计算每个重要日期的剩余天数
     const today = new Date()
-    const currentYear = today.getFullYear()
-    
-    const calculatedDays = importantDaysData.map(day => {
-      const [month, dayOfMonth] = day.dateStr.split('-').map(Number)
-      let targetDate = new Date(currentYear, month - 1, dayOfMonth)
-      
-      // 如果今年的日期已经过了，计算明年的
-      if (today > targetDate) {
-        targetDate = new Date(currentYear + 1, month - 1, dayOfMonth)
-      }
-      
-      // 计算剩余天数
-      const timeDiff = targetDate.getTime() - today.getTime()
-      const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24))
-      
-      return {
-        name: day.name,
-        daysRemaining
-      }
-    })
-    
+
+    const calculatedDays = importantDaysData
+      .map((day) => {
+        const parsed = parseLunarDate(day.dateStr)
+        if (!parsed) return null
+        return {
+          name: day.name,
+          daysRemaining: daysUntilLunar(parsed.month, parsed.day, today),
+        }
+      })
+      .filter((x) => x !== null)
+
     importantDays.value = calculatedDays
   }
   
@@ -325,5 +316,3 @@ const formattedLoveTime = computed(() => {
   return `${years}年${months}月${days}日${hours.toString().padStart(2, '0')}时${minutes.toString().padStart(2, '0')}分${seconds.toString().padStart(2, '0')}秒`
 })
 </script>
-
-
