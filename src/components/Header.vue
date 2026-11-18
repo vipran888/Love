@@ -109,11 +109,11 @@ defineProps({
 const config = ref({})
 
 // 男生信息
-const boyName = ref('水常')
+const boyName = ref('张帅')
 const boyAvatar = ref('https://s2.loli.net/2024/12/25/CqQwNS6p2WDAk18.jpg')
 
 // 女生信息
-const girlName = ref('萍之六')
+const girlName = ref('胡宇佳')
 const girlAvatar = ref('https://s2.loli.net/2024/12/25/Qzfr45S9uJYKkp8.jpg')
 
 // 计算header背景样式
