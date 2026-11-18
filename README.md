@@ -5,7 +5,7 @@
 
 ![演示效果](https://love.jianzhugo.cn/images/jiepin.png)
 
-## ✨ 特色功能
+## ✨ 特色功能 
 
 ### 🎨 视觉设计
 - 采用渐变色彩和现代 UI 设计
